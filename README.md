@@ -1,15 +1,7 @@
 # Civil War Pension Files — Transcription Workflow
 ## How the System Works
 
-This document explains how we will digitise, transcribe, and verify the Civil War pension file collection — and what role each tool plays. It is written for someone who wants to understand the process without needing to run it themselves.
-
-
-## The Problem We Are Solving
-
-The collection contains around **200 PDF files**, each one a scanned pension record. A single file can be anywhere from 26 to 300 pages. In total there are roughly **30,000 pages** to transcribe.
-
-Transcribing 30,000 pages manually would take an impractical amount of time. Using AI alone risks errors, especially with names. The approach here combines both: AI does a first pass, and human volunteers correct it. The result is faster than manual transcription and more accurate than AI alone.
-
+This document explains how we will set up Zooniverse on a high level. See [initial_design_doc.md](initial_design_doc.md) for more details.
 
 ## The Five Stages
 
@@ -32,13 +24,9 @@ At the end of this stage there will be roughly 30,000 image files, organised int
 > **One thing to note:** Zooniverse (the platform used in Stage 3) has a strict 1 MB file size limit per image. PNG files at 300 DPI are typically 3–8 MB each, so they need to be converted to JPEG and lightly compressed before upload. This is handled automatically in the pipeline and does not affect readability.
 
 
-### Stage 2 — Generating AI Transcriptions
+### Stage 2 — Getting AI transcribed files
 
-Each page image is passed through an AI transcription tool, which produces a draft text file for that page.
-
-The AI output is imperfect — it handles printed text well but struggles with handwriting, unusual spellings, and names. That is expected. The AI draft is not the final product; it is a starting point that volunteers will correct in Stage 4.
-
-At the end of this stage there is a text file for every image:
+Using DARE, we will get a series of text files:
 
 ```
 Robinson_Lucius-1.txt   (AI draft for page 1)
@@ -62,13 +50,11 @@ The 30,000 pages are split into multiple **subject sets** (groups of pages) rath
 
 Once uploaded, each page is shown to volunteers on the Zooniverse platform alongside its AI draft transcription.
 
-Volunteers are asked to do two things:
+Volunteers are asked to do this:
 
-**Task 1 — Correct the transcription.** The volunteer copies the AI text into an editing box and fixes any mistakes. They are asked to pay particular attention to names, and to preserve the original wording and spelling of the document even if it looks unusual.
+**Task - Correct the transcription.** The volunteer copies the AI text into an editing box and fixes any mistakes. They are asked to pay particular attention to names, and to preserve the original wording and spelling of the document even if it looks unusual.
 
-**Task 2 — Confirm names.** A simple yes/no/unsure question: are all personal names correctly transcribed?
-
-Each page is shown to **five separate volunteers** independently. This matters because any single volunteer might miss something — but if four out of five agree on a correction, that result is much more reliable. Once a page has been seen by enough volunteers, Zooniverse automatically retires it (stops showing it to new volunteers).
+Each page is shown to **5 separate volunteers** idnependently (can be changed). This matters because any single volunteer might miss something, but if four out of five agree on a correction, that result is much more reliable. Once a page has been seen by enough volunteers, Zooniverse automatically retires it (stops showing it to new volunteers).
 
 
 ### Stage 5 — Exporting and Combining Results
@@ -78,7 +64,7 @@ When the project is complete (or at any point during it), the classifications ar
 A processing script then:
 
 1. Groups all five volunteer responses for each page together
-2. Compares them and identifies the most consistent answer
+2. Compares them and identifies the most consistent answer - need research on how to do this
 3. Produces one final verified text file per page
 
 The output is a folder of clean transcription files, one per page, ready for research use:
@@ -115,7 +101,7 @@ validated_transcripts/
 
 ## What Could Go Wrong
 
-**Image file sizes.** PNG files from the conversion step are too large for Zooniverse's 1 MB limit. This is handled by converting to JPEG before upload — it is a known step in the pipeline, not a surprise.
+**Image file sizes.** PNG files from the conversion step are too large for Zooniverse's 1 MB limit. This is handled by converting to JPEG before upload.
 
 **The 10,000 subject default limit.** Zooniverse accounts are limited to 10,000 uploads by default. A limit increase request to the Zooniverse team is required before uploading the full dataset. This is routine for large projects.
 

@@ -8,7 +8,7 @@
 ### Core Pipeline
 
 1. Convert scanned PDFs into page-level images
-2. Generate AI transcriptions for each page
+2. Download the generated AI transcriptions for each page
 3. Build a manifest CSV linking images to transcriptions
 4. Upload images and manifest to Zooniverse as subjects
 5. Volunteers correct errors, especially names
@@ -29,13 +29,28 @@ Thinking about the numbers:
 
 Individual PDFs range from 26 to 300 pages. The pipeline must handle batch processing of the full collection without manual intervention at each step.
 
-**Does Zooniverse support this scale?** Yes, with two constraints to plan around before upload begins.
+**Does Zooniverse support this scale?** Yes, with 2 constraints to plan around before upload begins.
 
-**Subject limit.** Each user account can upload 10,000 subjects by default; this limit can be increased upon request by contacting the Zooniverse team. At 30,000 pages this project exceeds the default, so a limit increase must be requested before upload. Regardless of the limit, the dataset should be broken into multiple subject sets — for example one per PDF — rather than uploaded as a single large set. Smaller subject sets complete and retire faster, which keeps volunteers engaged and means corrected transcriptions become available sooner.
+- Subject limit
 
-**Image file size.** Zooniverse sets a strict per-image upper limit of 1 MB and recommends using standard image processing tools such as ImageMagick to bring images within this limit. A full-page PNG at 300 DPI will typically be 3–8 MB — well above the ceiling. All images must be compressed before upload. Converting to JPEG at around 65% quality is the recommended approach: testing on comparable archival projects has shown no visible deterioration when enlarged on a large monitor at this setting. This compression step must be added to the pipeline between `pdftoppm` output and Zooniverse upload.
+  - Zooniverse user accounts can upload 10,000 subjects by default, but this limit can be increased by requesting a higher quota from the Zooniverse team.
+  - Because the dataset contains around 30,000 pages, the project exceeds the default limit and a limit increase should be requested before beginning the upload process.
+  - The dataset should not be uploaded as a single large subject set. Instead, it should be divided into multiple subject sets, currently planned as one set per PDF.
+  - Smaller subject sets typically complete and retire faster, which helps maintain volunteer engagement and allows corrected transcriptions to become available earlier.
 
-**Upload method.** The simple browser uploader should be used in batches of no more than 1,000 subjects at a time and is not practical at 30,000 pages. For teams with more than 1,000 subjects, Zooniverse officially supports batch uploading through the Panoptes command-line interface and Python client — these are the right tools for this dataset.
+- Image file size
+
+  - Zooniverse enforces a strict maximum image size of 1 MB per image, while a full-page PNG at 300 DPI will typically be between 3 MB and 8 MB, which exceeds the allowed upload limit.
+  - All images must therefore be compressed before upload.
+  - The recommended approach is to convert the images to JPEG at around 65% quality, which testing on comparable archival projects shows produces no visible deterioration when enlarged on a large monitor.
+  - This compression step should be inserted into the pipeline between the `pdftoppm` output stage and the Zooniverse upload stage.
+
+- Upload method
+
+  - The browser uploader is intended for small projects and should only be used in batches of about 1,000 subjects.
+  - With roughly 30,000 pages, the browser uploader is not practical for this dataset.
+  - For projects larger than 1,000 subjects, Zooniverse supports automated batch uploads through the Panoptes command-line interface and the Panoptes Python client.
+  - These tools allow subjects to be uploaded programmatically and are the appropriate approach for managing this dataset.
 
 <!-- ## 2. Goals
 
@@ -56,34 +71,7 @@ Secondary Goals
 ### System Architecture
 
 Pipeline Overview
-
-```
-PDF documents
-    |
-    v
-PDF to Image Conversion  (pdftoppm)
-    |
-    v
-AI Transcription Generation
-    |
-    v
-Manifest CSV Creation
-    |
-    v
-Upload to Zooniverse  (Panoptes client)
-    |
-    v
-Volunteer Correction Workflow
-    |
-    v
-Zooniverse Data Export
-    |
-    v
-Post-processing and Aggregation
-    |
-    v
-Final Verified Transcriptions
-```
+![Pipeline Workflow](assets/workflow.png)
 
 ## 4. Data Model
 
