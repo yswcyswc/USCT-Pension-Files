@@ -1,36 +1,43 @@
 import pathlib
 import csv
+import re
 
 images_dir = pathlib.Path("dataset/images")
 transcripts_dir = pathlib.Path("dataset/ai_transcripts")
 manifest_path = pathlib.Path("dataset/manifest.csv")
 
+def extract_page_num(stem: str):
+    m = re.search(r"-(\d+)$", stem)
+    return int(m.group(1)) if m else None
+
 rows = []
 
 for img_path in sorted(images_dir.rglob("*.png")):
-    name = img_path.stem  # Robinson_Lucius-1
-    pdf_name = img_path.parent.name  # Robinson_Lucius
-    page_num = name.rsplit("-", 1)[-1]  # 1
+    image_stem = img_path.stem
+    pdf_name = img_path.parent.name
+    page_num = extract_page_num(image_stem)
 
-    transcript_path = transcripts_dir / pdf_name / f"{name}.txt"
+    transcript_dir = transcripts_dir / pdf_name
+    transcript_path = ""
 
-    # Read the actual transcript text
-    if transcript_path.exists():
-        ai_transcript = transcript_path.read_text(encoding="utf-8").strip()
-    else:
-        ai_transcript = ""  # or some placeholder like "[No transcript available]"
+    if transcript_dir.exists() and page_num is not None:
+        for txt_path in sorted(transcript_dir.glob("*.txt")):
+            txt_page = extract_page_num(txt_path.stem)
+            if txt_page == page_num:
+                transcript_path = str(txt_path)
+                break
 
     rows.append({
         "image": str(img_path),
         "page": page_num,
         "pdf": pdf_name,
-        "AI Transcript": ai_transcript   # exact name to match {{AI Transcript}} !!!!!This does not work sadly...!!!!!
+        "ai_text_file": transcript_path
     })
 
 with open(manifest_path, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(
         f,
-        fieldnames=["image", "page", "pdf", "AI Transcript"]
+        fieldnames=["image", "page", "pdf", "ai_text_file"]
     )
     writer.writeheader()
     writer.writerows(rows)

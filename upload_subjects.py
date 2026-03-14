@@ -6,7 +6,7 @@ USERNAME = "usct_pension_files"
 PASSWORD = "usct2026"
 
 PROJECT_ID = 32086
-SUBJECT_SET_NAME = "Lucius_Robinson_Clean_Test"
+SUBJECT_SET_NAME = "RobinsonLucius+RobinsonHarry"
 
 MANIFEST_PATH = Path("dataset/manifest.csv")
 
