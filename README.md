@@ -5,6 +5,9 @@ This document explains how we will set up Zooniverse on a high level. See [initi
 
 ## The Five Stages
 
+Pipeline Overview
+![Pipeline Workflow](assets/workflow.png)
+
 ### Stage 1 — Converting the PDFs into Images
 
 Before anything can be transcribed, each page of each PDF needs to become its own image file. We do this because Zooniverse only accepts images as inputs. 
@@ -36,8 +39,6 @@ Robinson_Lucius-2.txt   (AI draft for page 2)
 
 
 ### Stage 3 — Uploading to Zooniverse
-
-**Zooniverse** is a well-established platform for crowd-assisted research. It has been used to transcribe millions of historical documents. Volunteers sign up for free and work through tasks at their own pace.
 
 Before uploading, a **manifest file** is created — a spreadsheet that tells Zooniverse which image belongs to which PDF, which page number it is, and where to find its AI draft text. This is what links everything together on the platform.
 
@@ -91,7 +92,7 @@ validated_transcripts/
 
 ## Scale at a Glance
 
-| | |
+| Metric | Value |
 |--|--|
 | PDF files | 200 |
 | Total pages | ~30,000 |
