@@ -104,6 +104,14 @@ dataset/
         Robinson_Lucius/
             Robinson_Lucius-1.txt
             Robinson_Lucius-2.txt
+    
+    validated_transcripts/
+        Robinson_Lucius/
+            Robinson_Lucius-1.txt
+            Robinson_Lucius-2.txt
+        Smith_John/
+            Smith_John-1.txt
+            Smith_John-2.txt
 
     manifest.csv
 ```
@@ -258,10 +266,6 @@ pip install panoptes-client
 ```
 
 ### Upload Script — `upload_subjects.py`
-
-```python
-todo
-```
 
 Run from the project root:
 
