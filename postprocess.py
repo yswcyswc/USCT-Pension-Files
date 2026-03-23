@@ -7,21 +7,23 @@ EXPORT_FILE = "classifications.csv"
 OUTPUT_ROOT = "dataset/validated_transcripts"
 
 
-def extract_transcription(annotations):
+def extract_corrected_text(annotations):
     """
-    Extract corrected transcription from annotation JSON.
+    Extract corrected transcription from a TextFromSubject annotation.
     """
     for task in annotations:
-        if task.get("task") == "T0":  # transcription task
+        if task.get("taskType") == "textFromSubject":
             value = task.get("value")
             if isinstance(value, str):
-                return value.strip()
+                value = value.strip()
+                if value:
+                    return value
     return None
 
 
 def majority_vote(texts):
     """
-    Choose the most common transcript among volunteers.
+    Choose the most common corrected transcript.
     """
     counter = Counter(texts)
     return counter.most_common(1)[0][0]
@@ -30,6 +32,10 @@ def majority_vote(texts):
 def parse_subject(subject_data):
     """
     Extract page metadata from subject_data JSON.
+
+    Assumes your uploaded manifest still includes metadata fields like:
+    - pdf
+    - page
     """
     subject_id = list(subject_data.keys())[0]
     meta = subject_data[subject_id]
@@ -50,12 +56,11 @@ def main():
             annotations = json.loads(row["annotations"])
             subject_data = json.loads(row["subject_data"])
 
-            text = extract_transcription(annotations)
+            text = extract_corrected_text(annotations)
             if not text:
                 continue
 
             pdf, page = parse_subject(subject_data)
-
             key = (pdf, page)
             classifications[key].append(text)
 

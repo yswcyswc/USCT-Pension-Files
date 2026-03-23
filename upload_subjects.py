@@ -40,24 +40,24 @@ with MANIFEST_PATH.open(newline="", encoding="utf-8") as f:
             print(f"Skipping missing transcript: {ai_text_path}")
             continue
 
-        ai_text_content = ai_text_path.read_text(encoding="utf-8", errors="replace")
-
         subject = Subject()
         subject.links.project = project
 
+        # Paired subject locations for TextFromSubject
         subject.add_location(str(image_path))
+        subject.add_location(str(ai_text_path))
 
+        # Keep useful metadata for downstream processing
         subject.metadata["page"] = row["page"]
         subject.metadata["pdf"] = row["pdf"]
         subject.metadata["image_filename"] = image_path.name
-        subject.metadata["ai_text_file"] = str(ai_text_path)
-        subject.metadata["AI Transcript"] = ai_text_content
+        subject.metadata["ai_text_filename"] = ai_text_path.name
 
         subject.save()
         subject_set.add(subject)
 
         count += 1
-        print(f"Uploaded {count}: {image_path.name}")
+        print(f"Uploaded {count}: {image_path.name} + {ai_text_path.name}")
 
 subject_set.save()
 
