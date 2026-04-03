@@ -1,116 +1,146 @@
 # Zooniverse Workflow
-## How the System Works
 
-This document explains how we will set up Zooniverse on a high level. See [initial_design_doc.md](initial_design_doc.md) for more details.
+## Overview
 
-Pipeline Overview
-![Pipeline Workflow](assets/workflow.png)
+This repository now follows a manifest-first upload workflow built around two separate sources of truth:
 
-### Stage 1 — Converting the PDFs into Images
+- `transcriber_db.db` is the source of truth for page-level transcriptions and metadata.
+- Amazon S3 is the source of truth for page images.
 
-Before anything can be transcribed, each page of each PDF needs to become its own image file. We do this because Zooniverse sadly only accepts images as inputs. 
+The Zooniverse upload pipeline does not depend on local image files. Instead, it:
 
-A command-line tool called **pdftoppm** reads a PDF and saves every page as a PNG image at high resolution (300 DPI — clear enough to read handwriting). This happens automatically for all 200 PDFs in one batch.
+1. Queries `transcriber_db.db`
+2. Generates a manifest CSV that pairs each page with an S3 image URL
+3. Uploads subjects to Zooniverse from that manifest using the Panoptes Python client
 
-Each image is named after its source file and page number:
+This is intended to be easy to hand back to project partners so they can run the same process at full scale.
 
-```
-Robinson_Lucius-1.png   (page 1 of Robinson_Lucius.pdf)
-Robinson_Lucius-2.png   (page 2)
-...
-```
+## Architecture
 
-At the end of this stage there will be roughly 30,000 image files, organised into folders by person.
+Pipeline overview:
 
-> **One thing to note:** Zooniverse has a strict 1 MB file size limit per image. PNG files at 300 DPI are typically 3–8 MB each, so they need to be converted to JPEG and lightly compressed before upload. This is handled automatically in the pipeline and does not affect readability.
+1. PDFs are converted to page images outside this repo's upload step.
+2. The page images are stored in S3 with stable HTTPS URLs.
+3. AI transcription text is stored in `transcriber_db.db`.
+4. `build_manifest.py` joins the DB records to the expected S3 URL pattern.
+5. `upload_subjects.py` creates Zooniverse subjects from the manifest.
+6. Volunteers review the page image and open the AI draft from subject metadata.
 
+## Files
 
-### Stage 2 — Getting AI Transcribed Files
+- `build_manifest.py`: Generates `dataset/manifest.csv` from the SQLite database and an S3 naming convention.
+- `upload_subjects.py`: Uploads subjects to Zooniverse from remote image URLs listed in the manifest.
+- `initial_design_doc.md`: Longer design and handoff notes.
+- `zooniverse_guide.md`: Manual verification checklist after upload.
 
-Using DARE, we will get a series of text files:
+## Manifest Format
 
-```
-Robinson_Lucius-1.txt   (AI draft for page 1)
-Robinson_Lucius-2.txt   (AI draft for page 2)
-...
-```
+`build_manifest.py` writes one row per transcribed page with these columns:
 
+- `image_url`
+- `page`
+- `pdf_file`
+- `pdf_stem`
+- `transcription_id`
+- `txt_file`
+- `ai_transcript`
 
-### Stage 3 — Uploading to Zooniverse
+The upload script uses:
 
-Before uploading, a **manifest file** is created. This is a spreadsheet that tells Zooniverse which image belongs to which PDF, which page number it is, and what the AI draft text is for that page. This is what links everything together on the platform.
+- `image_url` for the remote Zooniverse subject media
+- `page`, `pdf_stem`, `pdf_file`, and `transcription_id` as subject metadata
+- `ai_transcript` as the `AI Transcript` metadata field shown in Zooniverse's subject info panel
 
-The images and manifest are uploaded in batches using a tool called the **Panoptes client** (Zooniverse's own upload tool for large datasets). Because this project has 30,000 pages — more than Zooniverse's default limit — a limit increase needs to be requested from the Zooniverse team before the full upload begins. This is a standard process for large projects.
+## Configuration
 
-The 30,000 pages are split into multiple **subject sets** (groups of pages) rather than one giant upload. Smaller sets complete faster, which means verified transcriptions start becoming available sooner rather than waiting for the entire collection to finish.
+Both scripts are configured with environment variables so partners can adapt the workflow without editing code.
 
+### `build_manifest.py`
 
-### Stage 4 — Volunteer Correction
+- `TRANSCRIBER_DB_PATH`
+  Default: `transcriber_db.db`
+- `MANIFEST_PATH`
+  Default: `dataset/manifest.csv`
+- `S3_BASE_URL`
+  Example: `https://my-bucket.s3.amazonaws.com`
+- `S3_PREFIX`
+  Optional prefix inside the bucket
+- `S3_KEY_TEMPLATE`
+  Default: `{pdf_stem}/{pdf_stem}-{page_padded}.jpg`
+- `PAGE_PADDING`
+  Default: `4`
 
-Once uploaded, each page is shown to volunteers on the Zooniverse platform. Volunteers are asked to:
+The default URL builder assumes a layout like:
 
-1. Read the scanned document image carefully.
-2. Click the **ⓘ (subject info) button** below the image to reveal the AI draft transcript.
-3. Copy the AI draft into the editing box and correct any mistakes.
-4. Pay particular attention to names, and preserve the original wording and spelling of the document even if it looks unusual.
-5. Use the **DELETION**, **INSERTION**, and **UNCLEAR** tags to mark problem areas.
-
-Each page is shown to **5 separate volunteers** independently. Once a page has been seen by enough volunteers, Zooniverse automatically retires it (stops showing it to new volunteers).
-
-> **!!!!!!!!!!!!Temporary setup — currently in contact with Zooniverse:** The AI draft transcript is currently shown to volunteers via the ⓘ subject info button rather than directly in the task panel. We have contacted the Zooniverse team to ask whether per-subject text can be injected into the task panel for a smoother experience. This section will be updated once we receive a response.
-
-
-### Stage 5 — Exporting and Combining Results
-
-When the project is complete (or at any point during it), the classifications are exported from Zooniverse as a data file. This file contains every correction every volunteer submitted for every page.
-
-A processing script then:
-
-1. Groups all five volunteer responses for each page together
-2. Compares them and identifies the most consistent answer — *method still being researched*
-3. Produces one final verified text file per page
-
-The output is a folder of clean transcription files, one per page, ready for research use:
-
-```
-validated_transcripts/
-    Robinson_Lucius/
-        Robinson_Lucius-1.txt
-        Robinson_Lucius-2.txt
-        ...
+```text
+https://my-bucket.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0001.jpg
+https://my-bucket.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0002.jpg
 ```
 
+If the partners use a different S3 naming pattern, update `S3_PREFIX`, `S3_KEY_TEMPLATE`, or both.
 
-## Summary View
+### `upload_subjects.py`
 
-| Stage | What happens | Tool |
-|-------|-------------|------|
-| 1 | PDFs converted to page images | pdftoppm |
-| 2 | AI generates draft transcription for each page | AI transcription interface (DARE) |
-| 3 | Images and drafts uploaded to Zooniverse | Panoptes client |
-| 4 | Volunteers correct transcriptions (5 per page) | Zooniverse platform |
-| 5 | Volunteer responses exported and combined | Python post-processing script |
+- `ZOONIVERSE_USERNAME`
+- `ZOONIVERSE_PASSWORD`
+- `ZOONIVERSE_PROJECT_ID`
+  Default: `32086`
+- `SUBJECT_SET_NAME`
+- `MANIFEST_PATH`
+  Default: `dataset/manifest.csv`
 
+## Usage
 
-## Scale at a Glance
+### 1. Generate the manifest
 
-| Metrics | Values |
-|--|--|
-| PDF files | 200 |
-| Total pages | ~30,000 |
-| Volunteers per page | 5 |
-| Total volunteer tasks | ~150,000 |
+PowerShell example:
 
+```powershell
+$env:S3_BASE_URL="https://my-bucket.s3.amazonaws.com"
+$env:S3_PREFIX="usct-pages"
+python build_manifest.py
+```
 
-## What Could Go Wrong
+### 2. Upload a subject set
 
-**Image file sizes.** PNG files from the conversion step are too large for Zooniverse's 1 MB limit. This is handled by converting to JPEG before upload.
+PowerShell example:
 
-**The 10,000 subject default limit.** Zooniverse accounts are limited to 10,000 uploads by default. A limit increase request to the Zooniverse team is required before uploading the full dataset. This is routine for large projects.
+```powershell
+$env:ZOONIVERSE_USERNAME="your-zooniverse-user"
+$env:ZOONIVERSE_PASSWORD="your-zooniverse-password"
+$env:SUBJECT_SET_NAME="Batch 01 - Abbs Wilkins"
+python upload_subjects.py
+```
 
-**Volunteer inconsistency.** Different volunteers will sometimes transcribe the same passage differently. This is why five volunteers review each page — it gives enough data to find the most reliable answer.
+## Important Assumptions
 
-**Damaged or illegible pages.** Some pages may be too damaged for AI or volunteers to read confidently. These can be flagged for manual expert review.
+- The S3 image URLs must be reachable by Zooniverse over HTTPS.
+- The S3 URLs must point directly to the image, not to a viewer page.
+- The file extension in the URL must match the actual media type so the upload script can infer the image MIME type.
+- The DB `transcriptions` table is the authoritative source for page order and transcript text.
 
-**AI draft not visible in task panel.** The ⓘ info button is currently used as a temporary workaround to display the AI draft. We are awaiting a response from Zooniverse on whether direct task panel injection is supported.
+## Scale Notes
 
+- Zooniverse projects often split large uploads into multiple subject sets.
+- If the full collection exceeds the default Zooniverse upload quota, partners should request a higher limit from the Zooniverse team before full deployment.
+- Remote image hosting in S3 avoids moving tens of thousands of images through one local workstation.
+
+## Verification
+
+After upload, use the checklist in `zooniverse_guide.md` to confirm:
+
+1. the subject set exists
+2. images load in the workflow
+3. the `AI Transcript` metadata field appears in the subject info panel
+4. test classifications are recorded correctly
+
+## Relationship to Weaviate
+
+Weaviate is not required for the Zooniverse upload pipeline.
+
+It is useful for semantic search over page transcripts, but the upload workflow only needs:
+
+- `transcriber_db.db`
+- S3 image hosting
+- manifest generation
+- Zooniverse upload credentials

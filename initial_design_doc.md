@@ -2,395 +2,204 @@
 
 ## Technical Design Document
 
-
 ## 1. Overview
 
-### Core Pipeline
+This design uses a split-source architecture that is practical for partner handoff and large-scale reruns:
 
-1. Convert scanned PDFs into page-level images
-2. Download the generated AI transcriptions for each page
-3. Build a manifest CSV linking images to transcriptions
-4. Upload images and manifest to Zooniverse as subjects
-5. Volunteers correct errors, especially names
-6. Export and aggregate corrected transcriptions for research use
+- `transcriber_db.db` stores page-level transcription text and related identifiers.
+- Amazon S3 stores the page images that Zooniverse will display.
+- A generated manifest CSV links the database records to the S3 image URLs.
+- Zooniverse subjects are created from that manifest with the Panoptes Python client.
 
-### Scale
+This avoids rebuilding a local image staging area every time a new upload batch is prepared.
 
-Thinking about the numbers:
+## 2. Core Pipeline
+
+1. Convert each PDF into page images.
+2. Store the page images in S3.
+3. Store or confirm page-level transcription text in `transcriber_db.db`.
+4. Generate a manifest from the DB plus the S3 URL convention.
+5. Upload subjects to Zooniverse from the manifest.
+6. Link the subject set to the workflow.
+7. Export volunteer classifications and post-process them later.
+
+## 3. Scale Assumptions
 
 | Metric | Value |
 |--------|-------|
-| PDFs | 200 |
-| Average pages per PDF | 150 |
-| Total pages | ~30,000 |
-| Classifications per page | 5 volunteers |
-| Total classifications | ~150,000 |
-| PDF page range | 26 to 300 pages per file |
+| PDFs | about 200 |
+| Average pages per PDF | about 150 |
+| Total pages | about 30,000 |
+| Classifications per page | 5 |
+| Total classifications | about 150,000 |
 
-Individual PDFs range from 26 to 300 pages. The pipeline must handle batch processing of the full collection without manual intervention at each step.
+At this scale:
 
-**Does Zooniverse support this scale?** Yes, with 2 constraints to plan around before upload begins.
+- browser-based upload is not the main path
+- images should live in durable object storage
+- uploads should be split across multiple subject sets
+- the upload process should be rerunnable without hand-editing CSV files
 
-- Subject limit
+## 4. Data Sources
 
-  - Zooniverse user accounts can upload 10,000 subjects by default, but this limit can be increased by requesting a higher quota from the Zooniverse team.
-  - Because the dataset contains around 30,000 pages, the project exceeds the default limit and a limit increase should be requested before beginning the upload process.
-  - The dataset should not be uploaded as a single large subject set. Instead, it should be divided into multiple subject sets, currently planned as one set per PDF.
-  - Smaller subject sets typically complete and retire faster, which helps maintain volunteer engagement and allows corrected transcriptions to become available earlier.
+### 4.1 SQLite database
 
-- Image file size
+`transcriber_db.db` is the source of truth for transcription text and page metadata.
 
-  - Zooniverse enforces a strict maximum image size of 1 MB per image, while a full-page PNG at 300 DPI will typically be between 3 MB and 8 MB, which exceeds the allowed upload limit.
-  - All images must therefore be compressed before upload.
-  - The recommended approach is to convert the images to JPEG at around 65% quality, which testing on comparable archival projects shows produces no visible deterioration when enlarged on a large monitor.
-  - This compression step should be inserted into the pipeline between the `pdftoppm` output stage and the Zooniverse upload stage.
+For the upload pipeline, the key table is `transcriptions`, especially:
 
-- Upload method
+- `id`
+- `pdf_file`
+- `page`
+- `txt_file`
+- `result`
 
-  - The browser uploader is intended for small projects and should only be used in batches of about 1,000 subjects.
-  - With roughly 30,000 pages, the browser uploader is not practical for this dataset.
-  - For projects larger than 1,000 subjects, Zooniverse supports automated batch uploads through the Panoptes command-line interface and the Panoptes Python client.
-  - These tools allow subjects to be uploaded programmatically and are the appropriate approach for managing this dataset.
+### 4.2 S3 object storage
 
-<!-- ## 2. Goals
+S3 is the source of truth for images.
 
-Primary Goals
+The upload pipeline assumes every transcribed page can be mapped to a stable HTTPS image URL in S3. The exact key structure can vary by partner setup, but it should be deterministic.
 
-- Enable efficient transcription validation of archival documents
-- Prioritize accuracy of names and key entities
-- Combine AI and crowd verification
-- Support large-scale batch processing
+Example:
 
-Secondary Goals
-
-- Groupings (not sure at this stage...)
-- Maintain traceability between PDFs, pages, and outputs
-- Minimize manual data preparation
-- Enable reproducible pipeline execution -->
-
-### System Architecture
-
-Pipeline Overview
-![Pipeline Workflow](assets/workflow.png)
-
-## 4. Data Model
-
-### 4.1 Subject Definition
-
-In Zooniverse, **1 subject = 1 page image**. Each page from each PDF becomes one subject.
-
-| PDF | Page | Image |
-|-----|------|-------|
-| Robinson_Lucius.pdf | 1 | Robinson_Lucius-1.png |
-| Robinson_Lucius.pdf | 2 | Robinson_Lucius-2.png |
-
-### 4.2 File Structure
-
-```
-dataset/
-    pdf/
-        Robinson_Lucius.pdf
-        Smith_John.pdf
-
-    images/
-        Robinson_Lucius/
-            Robinson_Lucius-1.png
-            Robinson_Lucius-2.png
-        Smith_John/
-            Smith_John-1.png
-            Smith_John-2.png
-
-    ai_transcripts/
-        Robinson_Lucius/
-            Robinson_Lucius-1.txt
-            Robinson_Lucius-2.txt
-    
-    validated_transcripts/
-        Robinson_Lucius/
-            Robinson_Lucius-1.txt
-            Robinson_Lucius-2.txt
-        Smith_John/
-            Smith_John-1.txt
-            Smith_John-2.txt
-
-    manifest.csv
+```text
+https://bucket-name.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0001.jpg
+https://bucket-name.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0002.jpg
 ```
 
-## 5. PDF to Image Conversion
+The important requirement is not the exact folder pattern. The important requirement is that the mapping from `pdf_file + page` to URL is stable and automatic.
 
-### Tool: pdftoppm (Poppler)
+## 5. Manifest Design
 
-`pdftoppm` converts each PDF page into a PNG image. It is part of the Poppler utilities package and runs from the command line.
+The manifest is generated rather than maintained manually.
 
-### Installation
+One row represents one Zooniverse subject.
 
-On Ubuntu / WSL:
+Recommended columns:
 
-```bash
-sudo apt install poppler-utils
-```
+- `image_url`
+- `page`
+- `pdf_file`
+- `pdf_stem`
+- `transcription_id`
+- `txt_file`
+- `ai_transcript`
 
-On Windows (via Scoop):
+This gives the uploader everything it needs:
 
-```bash
-scoop install poppler
-```
+- a remote image to display
+- page and file metadata
+- the AI transcript text to expose in the subject info panel
 
-### Single File — Manual Command
+## 6. Subject Definition
 
-This is the basic form used to convert one PDF. The command below was used during initial testing:
+In Zooniverse:
 
-```bash
-pdftoppm -png -r 300 "Robinson, Lucius test.pdf" page
-```
+- 1 subject = 1 page image
 
-Explanation of flags:
+Each subject should carry enough metadata to trace it back to the original DB row.
 
-| Flag | Meaning |
-|------|---------|
-| `-png` | Output format is PNG |
-| `-r 300` | Resolution: 300 DPI (suitable for archival documents) |
-| `"Robinson, Lucius test.pdf"` | Input PDF (quotes required when filename has spaces) |
-| `page` | Output filename prefix — produces page-1.png, page-2.png, etc. |
+Recommended metadata fields:
 
-Output from the command above:
+- `page`
+- `pdf`
+- `pdf_file`
+- `transcription_id`
+- `source_image_url`
+- `txt_file`
+- `AI Transcript`
 
-```
-page-1.png
-page-2.png
-page-3.png
-...
-```
+## 7. Upload Method
 
-### Batch Conversion — All PDFs in a Folder
+The Panoptes Python client is the preferred upload path for this project.
 
-For the full dataset, a shell script loops over every PDF in the `pdf/` directory and converts each one into its own subfolder under `images/`.
+Why:
 
-**Bash script (Linux / WSL) — `convert_pdfs.sh`:**
-See bash convert_pdfs.sh file.
+- it supports automated batch uploads
+- it supports remote media URLs
+- it is easier to rerun than the browser uploader
 
+The upload script should:
 
-**Example terminal output:**
+1. read the generated manifest
+2. create a subject set
+3. add each S3 image URL as subject media
+4. attach transcript text as subject metadata
+5. save the subjects and add them to the set
 
-```
-Converted: Robinson_Lucius
-Converted: Smith_John
-Done. Images saved to dataset/images
-```
+## 8. Why S3 Instead of Local Files or Drive Links
 
-**Example files produced:**
+S3 is the better production fit because it provides:
 
-```
-dataset/images/Robinson_Lucius/Robinson_Lucius-1.png
-dataset/images/Robinson_Lucius/Robinson_Lucius-2.png
-dataset/images/Smith_John/Smith_John-1.png
-dataset/images/Smith_John/Smith_John-2.png
-```
+- direct HTTPS object URLs
+- predictable naming
+- better long-term ownership for partners
+- less dependency on one local machine
+- easier scale-up for tens of thousands of pages
 
-### Naming Convention
+Google Drive viewer links are less suitable because they are often page URLs rather than direct media URLs and may behave differently depending on sharing settings or rate limits.
 
-`pdftoppm` appends a hyphen and page number to the prefix you supply. For a prefix of `Robinson_Lucius`, the output is:
+## 9. Zooniverse Workflow Notes
 
-```
-Robinson_Lucius-1.png
-Robinson_Lucius-2.png
-...
-Robinson_Lucius-26.png
-```
+The volunteer-facing workflow remains simple:
 
-This naming is used consistently throughout the rest of the pipeline — in the manifest CSV, AI transcript filenames, and Zooniverse subject metadata.
+1. volunteer opens the page image
+2. volunteer opens the subject info panel if needed
+3. volunteer views the AI draft transcript
+4. volunteer corrects the text
 
-### Notes on Resolution
+This design keeps the AI draft close to the page without requiring a second local transcript file upload.
 
-300 DPI is recommended for handwritten archival documents. Lower resolutions may be used if storage or upload time is a concern, but may reduce transcription accuracy.
+## 10. Operational Notes For Partners
 
-| Resolution | Use case |
-|------------|----------|
-| 150 DPI | Draft / fast processing |
-| 300 DPI | Standard archival quality (recommended) |
-| 600 DPI | High detail, large file sizes |
+Partners should be able to rerun the upload process by controlling:
 
-## 6. AI Transcription Generation
+- DB path
+- S3 base URL
+- S3 prefix
+- S3 key template
+- Zooniverse credentials
+- subject set name
 
-An external research interface generates AI transcriptions for each page image. The transcript for each page is saved as a `.txt` file with the same base name as the image.
+Those values should be managed through environment variables whenever possible.
 
-**Mapping rule:** `Robinson_Lucius-1.png` maps to `Robinson_Lucius-1.txt`
-
-**Output structure:**
-
-```
-ai_transcripts/
-    Robinson_Lucius/
-        Robinson_Lucius-1.txt
-        Robinson_Lucius-2.txt
-    Smith_John/
-        Smith_John-1.txt
-        Smith_John-2.txt
-```
-
-## 7. Manifest CSV
-
-Zooniverse requires a manifest CSV describing all uploaded subjects. Each row is one page image and links to its metadata and AI transcript. The manifest must be a CSV file — Zooniverse does not accept Excel's `.xlsx` format. The first column must contain the image filename exactly as it appears in the upload; any mismatch between manifest filenames and actual image filenames will cause an upload error. Each subject set must have its own manifest.
-
-### Building the Manifest — `build_manifest.py`
-
-Run from the project root:
-
-```bash
-python build_manifest.py
-```
-
-**Example terminal output:**
-
-```
-Manifest written: 30000 subjects
-```
-
-**Example manifest.csv:**
-
-```csv
-image,page,pdf,ai_text
-Robinson_Lucius-1.png,1,Robinson_Lucius,dataset/ai_transcripts/Robinson_Lucius/Robinson_Lucius-1.txt
-Robinson_Lucius-2.png,2,Robinson_Lucius,dataset/ai_transcripts/Robinson_Lucius/Robinson_Lucius-2.txt
-Smith_John-1.png,1,Smith_John,dataset/ai_transcripts/Smith_John/Smith_John-1.txt
-```
-
-## 8. Upload to Zooniverse
-
-Subjects are uploaded into Subject Sets using the Panoptes Python client. The Panoptes CLI and Python client are both officially supported by Zooniverse for teams with more than 1,000 subjects to upload, and offer equivalent functionality.
-
-### Installation
-
-```bash
-pip install panoptes-client
-```
-
-### Upload Script — `upload_subjects.py`
-
-Run from the project root:
-
-```bash
-python upload_subjects.py
-```
-
-**Example terminal output:**
-
-```
-Uploaded: Robinson_Lucius-1.png
-Uploaded: Robinson_Lucius-2.png
-...
-Upload complete.
-```
-
-### Manual Upload (Alternative)
-
-For small batches only (under 1,000 subjects), subjects can be uploaded through the browser:
-
-Project Builder > Subject Sets > New Subject Set > Upload images and manifest
-
-The manifest CSV must be uploaded alongside the images. This method is not suitable for the full dataset at 30,000 pages.
-
-## 9. Zooniverse Workflow Design
-
-Only one workflow is needed for the entire project. A workflow is the sequence of tasks a volunteer completes when presented with a subject. Tasks should be simple enough to complete with minimal guidance, and each task should contribute useful data even if the volunteer does not finish the entire workflow.
-
-### Task 1: Correct AI Transcription
-
-Display the page image alongside the AI-generated transcription.
-
-**Volunteer instructions:**
-
-1. Copy the AI transcription into the text editor
-2. Correct any mistakes
-3. Pay special attention to names
-4. Preserve original wording and spelling
-
-**Volunteer response field:** Corrected transcription
-
-### Task 2: Name Verification
-
-**Question:** Are all personal names correctly transcribed?
-
-**Answer options:** Yes / No / Unsure
-
-**Optional task:** Highlight names directly on the image.
-
-## 10. Classification Process
-
-Each subject receives classifications from multiple volunteers to reduce the impact of individual errors. A subject is retired once it reaches the classification retirement limit set for the workflow — the number of classifications at which Zooniverse stops showing it to new volunteers. This limit is configured in the Project Builder.
-
-**Example — Robinson_Lucius-1.png:**
-
-- Volunteer A submits corrected transcription
-- Volunteer B submits corrected transcription
-- Volunteer C submits corrected transcription
-- Volunteer D submits corrected transcription
-- Volunteer E submits corrected transcription
-
-**Consensus methods:** majority voting, manual expert review, confidence scoring
-
-## 11. Data Export
-
-Classification data is exported from:
-
-Project Builder > Lab > Data Exports > Request Classification Export
-
-The export is a CSV file with one row per classification submitted. Zooniverse also provides a separate subject export (one row per subject uploaded) and a workflow export. All exports are requested from the same Data Exports tab and generated asynchronously — large exports may take time to prepare.
-
-**Classification export fields:** classification_id, user_name, user_id, user_ip, workflow_id, workflow_name, workflow_version, created_at, gold_standard, expert, metadata, annotations, subject_data, subject_ids
-
-## 12. Post-Processing
-
-### Processing Steps
-
-1. Parse the classification export CSV
-2. Extract the corrected transcription from each annotation
-3. Group classifications by subject (page)
-4. Aggregate multiple responses using the chosen consensus method
-5. Write the final validated transcript for each page
-
-### Post-Processing Script — `postprocess.py`
-
-```python
-todo
-```
-
-Run from the project root:
-
-```bash
-python postprocess.py
-```
-
-**Output structure:**
-
-```
-dataset/validated_transcripts/
-    Robinson_Lucius/
-        Robinson_Lucius-1.txt
-        Robinson_Lucius-2.txt
-    Smith_John/
-        Smith_John-1.txt
-        Smith_John-2.txt
-```
-
-## 13. Quality Control
-
-- Multiple independent classifications per page
-- Consensus aggregation across volunteer responses
-- Expert spot checks on flagged pages
-- Name verification task surfacing uncertain names
-
-## 14. Risks
+## 11. Failure Modes And Mitigations
 
 | Risk | Mitigation |
 |------|------------|
-| Filename mismatches between images and transcripts | Consistent naming convention enforced at conversion step |
-todo
+| S3 URL pattern does not match actual object keys | Keep the key template configurable and test one batch first |
+| Zooniverse cannot fetch the image URL | Confirm the URL is direct, public or otherwise reachable, and HTTPS |
+| Wrong page-to-image mapping | Derive URLs from a deterministic naming rule and spot-check sample pages |
+| Missing transcript text | Pull directly from `transcriptions.result` in the DB |
+| Large full-dataset upload | Break into multiple subject sets and request a quota increase if needed |
 
-## 15. Future Improvements
+## 12. Relationship To Weaviate
 
-todo
+Weaviate is not required for the upload pipeline.
 
-## 16. Summary
+Its role is separate:
 
-todo
+- semantic search
+- retrieval across many pages
+- research exploration and QA support
+
+For Zooniverse upload, the necessary production components are:
+
+- SQLite database
+- S3 object storage
+- generated manifest
+- Zooniverse upload script
+
+## 13. Handoff Model
+
+This repository should be easy for partners to run after handoff.
+
+The intended handoff package is:
+
+1. `transcriber_db.db`
+2. the upload scripts
+3. documented S3 naming assumptions
+4. Zooniverse project credentials handled by the partner team
+5. a short upload checklist
+
+That keeps the workflow reproducible without depending on student-local file layouts.
