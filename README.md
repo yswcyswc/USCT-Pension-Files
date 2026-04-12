@@ -9,13 +9,20 @@ At a high level, the workflow is:
 
 1. original pension files are transcribed page by page
 2. page images and page-level text are stored as source data
-3. entities such as people, locations, and dates are extracted
+3. entities such as people, locations, and dates are extracted and then optimized using Splink linkage to identify variations or misspellings of the same name and link them together.
 4. Zooniverse is used for human review and correction
 5. validated results can feed later aggregation, analysis, and public-facing search
 
 The current code in this repo is centered on the Zooniverse portion of that workflow, but it depends on the broader transcription and extraction pipeline.
 
 ![USCT Pension Files Project Workflow](<assets/373 Project Workflow Updated.jpg>)
+
+
+If you are approaching this as:
+
+- a client or project partner, start with [CLIENT_README.md](CLIENT_README.md)
+- a future student team member, start with this and [FUTURE_TEAMS_README.md](FUTURE_TEAMS_README.md)
+- Dietrich Computing or a technical maintainer, start with [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
 
 ## Main Components
 
@@ -143,10 +150,3 @@ python src\zooniverse\postprocess.py
 - The DB access layer for the current Zooniverse workflow is split into `src/zooniverse/db_queries.py`.
 - If you change the manifest text format, existing Zooniverse subject sets will not update automatically.
 
-## Next Read
-
-If you are approaching this as:
-
-- a client or project partner, start with [CLIENT_README.md](CLIENT_README.md)
-- a future student team member, start with [FUTURE_TEAMS_README.md](FUTURE_TEAMS_README.md)
-- Dietrich Computing or a technical maintainer, start with [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
