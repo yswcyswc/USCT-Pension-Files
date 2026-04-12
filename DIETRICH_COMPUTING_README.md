@@ -172,10 +172,11 @@ This field holds the full formatted `TextFromSubject` text payload used for uplo
 Responsibilities:
 
 - connect to Zooniverse using Panoptes
-- create a fresh subject set
+- create or reuse a subject set
 - read the generated manifest
 - upload one remote image plus one paired text payload per subject
 - attach core metadata
+- support resume behavior by skipping rows that are already linked or by using a manual skip count during recovery
 
 ### `src/zooniverse/transcript_formatter.py`
 
@@ -193,6 +194,31 @@ Responsibilities:
 - extract only the editable names/places section from `textFromSubject` responses
 - majority-vote that editable section per `transcription_id`
 - write the aggregated result into `transcriptions.validated_names`
+
+## Post-Processing Details
+
+The post-processing step is intentionally narrow. It does not try to re-ingest the entire transcription from Zooniverse. Instead, it only trusts the volunteer-edited section above the `===Do NOT modify below this===` marker.
+
+The workflow is:
+
+1. Export classifications from Zooniverse as a CSV file.
+2. Place the export where `src/zooniverse/postprocess.py` can read it. By default this is `classifications.csv` at the repo root, but `EXPORT_FILE` can override that path.
+3. For each classification row, the script reads:
+   - `annotations` to find the `textFromSubject` response
+   - `subject_data` to recover the original `transcription_id`
+4. The script strips off the full-transcription context and keeps only the volunteer-editable block using the helper logic in `src/zooniverse/transcript_formatter.py`.
+5. All normalized volunteer responses for the same `transcription_id` are grouped together.
+6. The script applies a simple majority vote and selects the most common edited block.
+7. The winning block is written back to `transcriptions.validated_names` in SQLite.
+
+This means `validated_names` currently stores one aggregated text blob per page, not a fully parsed research-grade table. It is best understood as an intermediate human-validated layer that later code can parse, normalize, or migrate into a richer schema.
+
+## Operational Notes For Teams
+
+- The upload/post-process loop depends on the Zooniverse subject metadata containing `transcription_id`.
+- The current implementation assumes one Zooniverse subject maps to one transcription row and one page.
+- If a run is interrupted, `src/zooniverse/upload_subjects_S3.py` now supports resuming in an existing subject set rather than forcing a brand new one.
+- Zooniverse exports should be treated as append-only snapshots. Keep a copy of the exact export used for any database update so the provenance of `validated_names` is recoverable later.
 
 ## Configuration
 
@@ -252,6 +278,15 @@ Several near-term changes are already anticipated:
 - use of direct `s3_image_url` / `s3_txt_url` columns when available
 - storage of volunteer-corrected text in a new linked table rather than overwriting originals
 - possible cleanup or normalization of extracted names and locations before manifest generation
+
+Additional recommendations for future teams:
+
+- Build a dedicated research interface if this workflow becomes central to the project. Zooniverse is useful for fast deployment and volunteer management, but it has real limitations for scholarly review work, including limited text formatting, weak layout control, and difficulty presenting richer evidence side-by-side.
+- Consider an interface that can show bold labels, clearer section hierarchy, color cues, provenance links, and synchronized views of image, transcription, extracted entities, and prior edits.
+- Store structured post-validation outputs in separate tables rather than a single `validated_names` text field. In the long run, research workflows will benefit from explicit validated people, places, aliases, confidence notes, and reviewer provenance.
+- Replace pure majority vote with a richer aggregation strategy when the scale justifies it. For example, future teams could compare volunteer edits line-by-line, flag disagreements for manual review, or combine crowd input with model-assisted adjudication.
+- Add more fault-tolerant batch operations around upload and export ingestion. Large runs can fail due to network interruptions or API instability, so resume-safe workflows should be treated as a requirement rather than a convenience.
+- Consider pushing validated outputs into a searchable internal review tool before building a full public-facing site. That would give researchers a place to inspect entity matches, trace evidence, and correct mistakes before publication.
 
 The current code is structured to make those changes incremental rather than requiring a full rewrite.
 

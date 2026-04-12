@@ -10,6 +10,8 @@ At a high level, the diagram shows three connected layers:
 2. entity linking and enrichment
 3. crowdsourced validation and downstream public use
 
+![USCT Pension Files Project Workflow](<assets/373 Project Workflow Updated.jpg>)
+
 The flow is:
 
 - original pension files go through AI transcription
@@ -49,6 +51,24 @@ The implemented flow in this repo is:
 In the workflow diagram, this corresponds to the path:
 
 - `Source Transcription Database (SQLite)` -> `Manifest.csv` -> `Zooniverse` -> `Crowd Validation DB` -> `Aggregation` -> `Final Output DB`
+
+## How Postprocessing Actually Works
+
+The most important thing to understand is that postprocessing here is not a full database sync from Zooniverse. It is a focused aggregation step for the editable names-and-places block shown to volunteers.
+
+The current logic is:
+
+1. Export a classifications CSV from Zooniverse after volunteers have completed enough work.
+2. Run `src/zooniverse/postprocess.py`.
+3. The script reads the `textFromSubject` response from each classification.
+4. It uses `subject_data` to recover the `transcription_id` that was attached during upload.
+5. It removes the protected context section and keeps only the volunteer-editable content above the `===Do NOT modify below this===` marker.
+6. It normalizes whitespace and minor formatting differences so that equivalent responses compare cleanly.
+7. It groups all responses by `transcription_id`.
+8. It selects the most common response using a majority vote.
+9. It writes that winning text block to `transcriptions.validated_names`.
+
+This is a pragmatic first version. It gives the project a crowd-validated output without requiring a full custom review platform, but it is not yet a rich or final research data model.
 
 ## Why the Current Design Looks Like This
 
@@ -152,6 +172,12 @@ The current local SQLite file does not yet include `s3_image_url` or `s3_txt_url
 4. Previously uploaded Zooniverse subjects are not updated in place.
    If you change the text format or metadata structure, you usually need a new subject set.
 
+5. Zooniverse is useful, but it is not an ideal scholarly annotation interface.
+   It gives limited control over formatting and presentation, which makes it harder to show emphasis, better visual hierarchy, structured evidence, and richer review cues.
+
+6. The current `validated_names` field is a single text blob.
+   That is enough for an intermediate result, but it is not the best long-term structure for downstream analysis.
+
 ## Likely Next Steps for Future Teams
 
 If you inherit this project, these are the most likely engineering directions:
@@ -162,6 +188,28 @@ If you inherit this project, these are the most likely engineering directions:
 4. Decide how validated output feeds back into the final output database shown in the diagram.
 5. Improve normalization of extracted people and place names before they are shown to volunteers.
 
+## Suggestions For Improvement
+
+These are the most promising ways to improve the system beyond the current semester's implementation:
+
+1. Build a custom research interface.
+   This is the clearest next step if the project continues. Zooniverse is excellent for quickly standing up volunteer workflows, but it has real limitations for research review. For example, you do not get strong control over formatting, cannot easily rely on bold text and richer layout cues, and cannot present image, transcription, extracted entities, and adjudication notes in a single purpose-built interface.
+
+2. Create a better reviewer experience.
+   A custom interface could show the page image next to the full transcription, highlight candidate names and places, show provenance from the extraction pipeline, and support clearer visual distinction between editable content and protected context.
+
+3. Move from text blobs to structured validation tables.
+   Instead of saving only one `validated_names` text field, future teams could create tables for validated people, validated places, aliases, reviewer decisions, disagreement flags, and confidence notes.
+
+4. Improve aggregation beyond majority vote.
+   Majority vote is a reasonable baseline, but it can fail when volunteers partially agree, format answers differently, or split across two close variants. A stronger system could compare edits section-by-section, route low-agreement cases to manual review, or combine crowd input with model-assisted adjudication.
+
+5. Add a dedicated internal review layer before public release.
+   Before data reaches a final public search interface, it would help to have a staff or researcher-facing tool for checking uncertain matches, tracing evidence, and approving or rejecting crowd-validated outputs.
+
+6. Strengthen operational resilience.
+   Large uploads and export ingestion steps should be resumable by default. Continue improving recovery behavior, progress tracking, and provenance logging so future teams do not have to redo long-running batches after an interruption.
+
 ## Practical Advice
 
 - Keep the page-level model unless there is a strong research reason to change it.
@@ -169,6 +217,7 @@ If you inherit this project, these are the most likely engineering directions:
 - Treat Zooniverse configuration as part of the system design, not as a separate manual step.
 - Test new upload logic with a tiny subject set before pushing a full batch.
 - Do not assume old subject sets reflect the newest text payload format.
+- If you continue using Zooniverse, document the exact workflow configuration and export procedure. Much of the real system behavior depends on those settings, not just the Python scripts.
 
 ## Suggested Starting Point
 
