@@ -1,146 +1,152 @@
-# Zooniverse Workflow
+# USCT Pension Files Project
+
 
 ## Overview
 
-This repository now follows a manifest-first upload workflow built around two separate sources of truth:
+This repository supports the USCT Pension Files project, which combines AI transcription, structured extraction, crowdsourced validation, and downstream research use for Civil War pension documents.
 
-- `transcriber_db.db` is the source of truth for page-level transcriptions and metadata.
-- Amazon S3 is the source of truth for page images.
+At a high level, the workflow is:
 
-The Zooniverse upload pipeline does not depend on local image files. Instead, it:
+1. original pension files are transcribed page by page
+2. page images and page-level text are stored as source data
+3. entities such as people, locations, and dates are extracted
+4. Zooniverse is used for human review and correction
+5. validated results can feed later aggregation, analysis, and public-facing search
 
-1. Queries `transcriber_db.db`
-2. Generates a manifest CSV that pairs each page with an S3 image URL
-3. Uploads subjects to Zooniverse from that manifest using the Panoptes Python client
+The current code in this repo is centered on the Zooniverse portion of that workflow, but it depends on the broader transcription and extraction pipeline.
 
-This is intended to be easy to hand back to project partners so they can run the same process at full scale.
+![USCT Pension Files Project Workflow](<assets/373 Project Workflow Updated.jpg>)
 
-## Architecture
+## Main Components
 
-Pipeline overview:
+- `dataset/transcriber_db.db`
+  SQLite database containing page-level transcriptions and extracted structured data.
 
-1. PDFs are converted to page images outside this repo's upload step.
-2. The page images are stored in S3 with stable HTTPS URLs.
-3. AI transcription text is stored in `transcriber_db.db`.
-4. `build_manifest.py` joins the DB records to the expected S3 URL pattern.
-5. `upload_subjects.py` creates Zooniverse subjects from the manifest.
-6. Volunteers review the page image and open the AI draft from subject metadata.
+- `src/zooniverse/build_manifest_S3.py`
+  Generates the current Zooniverse manifest from the database using the S3 / CloudFront image setup.
 
-## Files
+- `src/zooniverse/db_queries.py`
+  Holds the SQLite query helpers used by the Zooniverse scripts.
 
-- `build_manifest.py`: Generates `dataset/manifest.csv` from the SQLite database and an S3 naming convention.
-- `upload_subjects.py`: Uploads subjects to Zooniverse from remote image URLs listed in the manifest.
-- `initial_design_doc.md`: Longer design and handoff notes.
-- `zooniverse_guide.md`: Manual verification checklist after upload.
+- `src/zooniverse/transcript_formatter.py`
+  Contains the names/places formatting logic used to build the volunteer-facing text block.
 
-## Manifest Format
+- `src/zooniverse/upload_subjects_S3.py`
+  Uploads page images and paired text files to Zooniverse using the `TextFromSubject` workflow.
 
-`build_manifest.py` writes one row per transcribed page with these columns:
+- `src/zooniverse/postprocess.py`
+  Reads Zooniverse classification exports, majority-votes the editable names/places section, and writes the result into `transcriptions.validated_names`.
 
-- `image_url`
-- `page`
-- `pdf_file`
-- `pdf_stem`
-- `transcription_id`
-- `txt_file`
-- `ai_transcript`
+- `dataset/manifest_s3.csv`
+  Generated manifest used for Zooniverse upload.
 
-The upload script uses:
+## Project Structure
 
-- `image_url` for the remote Zooniverse subject media
-- `page`, `pdf_stem`, `pdf_file`, and `transcription_id` as subject metadata
-- `ai_transcript` as the `AI Transcript` metadata field shown in Zooniverse's subject info panel
+The repository now uses a simple `src/` layout:
 
-## Configuration
+- `src/zooniverse/`
+  Current scripts for the active S3 / CloudFront + `TextFromSubject` workflow.
 
-Both scripts are configured with environment variables so partners can adapt the workflow without editing code.
+- `src/legacy/`
+  Older non-S3 scripts and archived helper scripts that are still retained for reference.
 
-### `build_manifest.py`
+- `src/user_testing/`
+  Small one-off upload scripts used with the `dataset/userTesting/` sample assets.
 
-- `TRANSCRIBER_DB_PATH`
-  Default: `transcriber_db.db`
-- `MANIFEST_PATH`
-  Default: `dataset/manifest.csv`
-- `S3_BASE_URL`
-  Example: `https://my-bucket.s3.amazonaws.com`
-- `S3_PREFIX`
-  Optional prefix inside the bucket
-- `S3_KEY_TEMPLATE`
-  Default: `{pdf_stem}/{pdf_stem}-{page_padded}.jpg`
-- `PAGE_PADDING`
-  Default: `4`
+- `dataset/`
+  Generated manifests and sample project data.
 
-The default URL builder assumes a layout like:
+- `dataset/userTesting/`
+  User-testing image assets, transcript assets, and the local user-testing readme.
 
-```text
-https://my-bucket.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0001.jpg
-https://my-bucket.s3.amazonaws.com/usct-pages/Abbs Wilkins/Abbs Wilkins-0002.jpg
-```
+- repo root
+  Project documentation, database files, and reference materials.
 
-If the partners use a different S3 naming pattern, update `S3_PREFIX`, `S3_KEY_TEMPLATE`, or both.
+## Zooniverse in Context
 
-### `upload_subjects.py`
+Zooniverse is the human validation layer in this project.
 
-- `ZOONIVERSE_USERNAME`
-- `ZOONIVERSE_PASSWORD`
-- `ZOONIVERSE_PROJECT_ID`
-  Default: `32086`
-- `SUBJECT_SET_NAME`
-- `MANIFEST_PATH`
-  Default: `dataset/manifest.csv`
+In the current design:
 
-## Usage
+- one subject equals one page
+- each subject includes one page image and one editable text file
+- volunteers review and correct the text in Zooniverse
+- those corrections are intended to support later aggregation and final output
 
-### 1. Generate the manifest
+This sits between the source transcription database and any later validated output database or public search interface.
 
-PowerShell example:
+## Current Workflow
+
+1. Page-level transcription text is stored in `transcriptions`.
+2. Extracted people and places are stored in `persons` and `locations`.
+3. `src/zooniverse/build_manifest_S3.py` creates `dataset/manifest_s3.csv`.
+4. `src/zooniverse/upload_subjects_S3.py` uploads the manifest contents to Zooniverse.
+5. Volunteers review and correct text using `TextFromSubject`.
+6. `src/zooniverse/postprocess.py` aggregates the editable section and writes majority-vote results back into the database.
+   This post-processing step still needs to be confirmed against real exports.
+
+## Key Documents
+
+- [CLIENT_README.md](CLIENT_README.md)
+  Short client-facing explanation of the Zooniverse stage.
+
+- [FUTURE_TEAMS_README.md](FUTURE_TEAMS_README.md)
+  Student-oriented handoff focused on the Zooniverse component in the context of the larger project.
+
+- [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
+  Technical design document for the current Zooniverse implementation.
+
+- [STUDENT_TEAM_README.md](STUDENT_TEAM_README.md)
+  Broader dataset and project background for student researchers.
+
+- [ZOONIVERSE_SETUP_CHECKLIST.md](ZOONIVERSE_SETUP_CHECKLIST.md)
+  Manual post-upload checklist for verifying the Zooniverse setup.
+
+## Running the Current Zooniverse Pipeline
+
+Generate the manifest:
 
 ```powershell
-$env:S3_BASE_URL="https://my-bucket.s3.amazonaws.com"
-$env:S3_PREFIX="usct-pages"
-python build_manifest.py
+python src\zooniverse\build_manifest_S3.py
 ```
 
-### 2. Upload a subject set
-
-PowerShell example:
+Set Zooniverse credentials and a subject set name:
 
 ```powershell
-$env:ZOONIVERSE_USERNAME="your-zooniverse-user"
+$env:ZOONIVERSE_USERNAME="your-zooniverse-username"
 $env:ZOONIVERSE_PASSWORD="your-zooniverse-password"
-$env:SUBJECT_SET_NAME="Batch 01 - Abbs Wilkins"
-python upload_subjects.py
+$env:ZOONIVERSE_PROJECT_ID="32086"
+$env:SUBJECT_SET_NAME="TextFromSubject Test"
 ```
 
-## Important Assumptions
+Upload to Zooniverse:
 
-- The S3 image URLs must be reachable by Zooniverse over HTTPS.
-- The S3 URLs must point directly to the image, not to a viewer page.
-- The file extension in the URL must match the actual media type so the upload script can infer the image MIME type.
-- The DB `transcriptions` table is the authoritative source for page order and transcript text.
+```powershell
+python src\zooniverse\upload_subjects_S3.py
+```
 
-## Scale Notes
+Post-process a Zooniverse classification export:
 
-- Zooniverse projects often split large uploads into multiple subject sets.
-- If the full collection exceeds the default Zooniverse upload quota, partners should request a higher limit from the Zooniverse team before full deployment.
-- Remote image hosting in S3 avoids moving tens of thousands of images through one local workstation.
+```powershell
+$env:EXPORT_FILE="classifications.csv"
+python src\zooniverse\postprocess.py
+```
 
-## Verification
+`postprocess.py` is currently marked as: needs to be confirmed.
 
-After upload, use the checklist in `zooniverse_guide.md` to confirm:
+## Important Notes
 
-1. the subject set exists
-2. images load in the workflow
-3. the `AI Transcript` metadata field appears in the subject info panel
-4. test classifications are recorded correctly
+- The current upload flow assumes the Zooniverse project is configured with the `TextFromSubject` task type.
+- Images are served from CloudFront rather than uploaded from a local image directory.
+- The current manifest stores the final upload-ready text in `final_txt_for_upload`.
+- Post-processing currently aggregates only the editable names/places block and stores the majority-vote result in `validated_names`.
+- The DB access layer for the current Zooniverse workflow is split into `src/zooniverse/db_queries.py`.
+- If you change the manifest text format, existing Zooniverse subject sets will not update automatically.
 
-## Relationship to Weaviate
+## Next Read
 
-Weaviate is not required for the Zooniverse upload pipeline.
+If you are approaching this as:
 
-It is useful for semantic search over page transcripts, but the upload workflow only needs:
-
-- `transcriber_db.db`
-- S3 image hosting
-- manifest generation
-- Zooniverse upload credentials
+- a client or project partner, start with [CLIENT_README.md](CLIENT_README.md)
+- a future student team member, start with [FUTURE_TEAMS_README.md](FUTURE_TEAMS_README.md)
+- a technical maintainer, start with [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
