@@ -1,4 +1,4 @@
-# USCT Pension Files Project
+# USCT Pension Files Project (Zooniverse Portion)
 
 
 ## Overview
@@ -149,4 +149,4 @@ If you are approaching this as:
 
 - a client or project partner, start with [CLIENT_README.md](CLIENT_README.md)
 - a future student team member, start with [FUTURE_TEAMS_README.md](FUTURE_TEAMS_README.md)
-- a technical maintainer, start with [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
+- Dietrich Computing or a technical maintainer, start with [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
