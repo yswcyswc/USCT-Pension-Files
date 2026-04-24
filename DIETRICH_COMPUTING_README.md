@@ -1,16 +1,12 @@
 # Technical Design Document
 
+Logic flow of this repo: 
+
+![Repo Logic Flow](assets/repo_logic_flow.jpg)
+
 ## Project Scope
 
-This repository supports the Zooniverse portion of the Civil War pension file workflow. The current design prepares page-level image and transcription data for human review in Zooniverse using the `TextFromSubject` task type.
-
-The main goal is to move away from a local-file-only upload model and toward a pipeline that:
-
-- stores page images online
-- keeps transcription data in a database
-- generates a manifest automatically
-- uploads paired image + text subjects to Zooniverse
-- supports volunteer correction of draft transcription text
+This repository supports the Zooniverse validation stage of the Civil War pension file workflow. The current design prepares page-level image and transcription data for human review in Zooniverse using the `TextFromSubject` task type.
 
 ## Current Architecture
 
@@ -32,7 +28,7 @@ The system now uses four main components:
    - one in-memory plain-text payload for `TextFromSubject`
 
 5. Post-processing
-   Classification exports are aggregated after volunteer work is complete and the majority-vote names/places block is written back to the database.
+   Classification exports are converted into cleaned page text and written back into validation columns in SQLite.
 
 ## Core Workflow
 
@@ -40,19 +36,14 @@ The intended flow is:
 
 1. A page is transcribed and stored in the `transcriptions` table.
 2. People and locations are extracted into `persons` and `locations`.
-3. `src/zooniverse/build_manifest_S3.py` reads the database and produces `dataset/manifest_s3.csv`.
-4. The manifest includes:
-   - `image_url`
-   - `txt_url`
-   - page/file metadata
-   - a formatted editable transcript block for Zooniverse
-5. `src/zooniverse/upload_subjects_S3.py` reads the manifest.
+3. `src/upload/build_manifest.py` reads the database and produces `dataset/manifest.csv`.
+4. `src/upload/upload_subjects.py` reads that manifest.
 6. For each row, the script:
    - links the remote page image
    - uploads the final text payload as the paired `TextFromSubject` text source
    - stores selected metadata on the Zooniverse subject
 7. Volunteers see the image and preloaded text in the transcription interface and can directly correct it.
-8. `src/zooniverse/postprocess.py` reads the classification export, majority-votes the editable section, and writes the result into `transcriptions.validated_names`.
+7. `src/upload/postprocess.py` reads the classification export, removes inline `<<...>>` markers, and writes cleaned page text into `validated1` or `validated2`.
 
 ## Why `TextFromSubject`
 
@@ -100,14 +91,14 @@ Important fields:
 - `page`
 - `txt_file`
 - `final_txt_for_upload`
-- `validated_names`
+- `validated1` / `validated2`
 
 Additional extracted data comes from:
 
 - `persons`
 - `locations`
 
-The current local SQLite file does not yet contain `s3_image_url` or `s3_txt_url`, so `src/zooniverse/build_manifest_S3.py` supports both cases:
+The current local SQLite file does not yet contain `s3_image_url` or `s3_txt_url`, so `src/upload/build_manifest.py` supports both cases:
 
 - if those columns exist in a future DB, it uses them directly
 - otherwise it constructs CloudFront URLs from the naming convention
@@ -116,34 +107,11 @@ This keeps the pipeline compatible with both the current local DB and an updated
 
 ## Zooniverse Text Payload Format
 
-The editable text uploaded for each subject is intentionally structured.
-
-Current format:
-
-```text
-===Modify below this===
-People:
-...
-
-Places / Locations:
-...
-
-===Do NOT modify below this===
-===Context: Full Transcription===
-...
-```
-
-The top section is designed to be edited by volunteers. The lower context section preserves the full source transcription for reference.
-
-The `People` and `Places / Locations` sections are generated from existing extracted tables rather than rerunning transcription.
-
-The reusable logic for this formatting now lives in:
-
-`src/zooniverse/transcript_formatter.py`
+The uploaded text is the page transcription with inline `<<...>>` highlights around detected people and locations. After review, postprocessing removes those markers before writing validated text back to the database.
 
 ## Script Responsibilities
 
-### `src/zooniverse/build_manifest_S3.py`
+### `src/upload/build_manifest.py`
 
 Responsibilities:
 
@@ -152,7 +120,7 @@ Responsibilities:
 - read extracted people and locations
 - derive or reuse CloudFront URLs
 - call the transcript formatter to build the Zooniverse text payload
-- write `dataset/manifest_s3.csv`
+- write `dataset/manifest.csv`
 
 Output columns:
 
@@ -167,7 +135,7 @@ Output columns:
 
 This field holds the full formatted `TextFromSubject` text payload used for upload.
 
-### `src/zooniverse/upload_subjects_S3.py`
+### `src/upload/upload_subjects.py`
 
 Responsibilities:
 
@@ -178,47 +146,60 @@ Responsibilities:
 - attach core metadata
 - support resume behavior by skipping rows that are already linked or by using a manual skip count during recovery
 
-### `src/zooniverse/transcript_formatter.py`
+### `src/upload/transcript_formatter.py`
 
 Responsibilities:
 
 - format the volunteer-facing names/places block
 - append the protected transcription context
-- extract and normalize the editable section for post-processing
+- remove inline entity tags and normalize full-page text for post-processing
 
-### `src/zooniverse/postprocess.py`
+### `src/upload/postprocess.py`
 
 Responsibilities:
 
 - read a Zooniverse classification export CSV
-- extract only the editable names/places section from `textFromSubject` responses
-- majority-vote that editable section per `transcription_id`
-- write the aggregated result into `transcriptions.validated_names`
+- recover the page either from `transcription_id` or from `pdf` + `page`
+- use the corrected text from `annotations`, or fall back to `subject_data["AI Transcript"]` when the row only records a confirmation like `yes`
+- strip inline `<<...>>` tags and write cleaned page text into `validated1` or `validated2`
 
-## Post-Processing Details
+## Validation Workflow
 
-The post-processing step is intentionally narrow. It does not try to re-ingest the entire transcription from Zooniverse. Instead, it only trusts the volunteer-edited section above the `===Do NOT modify below this===` marker.
+The intended review loop is:
 
-The workflow is:
+1. Build from `final_txt_for_upload` and upload to Zooniverse.
+2. Export classifications and write the cleaned result into `validated1`.
+3. Build again using `TRANSCRIPT_SOURCE_FIELD=validated1`.
+4. Upload a second review round if needed.
+5. Export again and write the cleaned result into `validated2`.
 
-1. Export classifications from Zooniverse as a CSV file.
-2. Place the export where `src/zooniverse/postprocess.py` can read it. By default this is `classifications.csv` at the repo root, but `EXPORT_FILE` can override that path.
-3. For each classification row, the script reads:
-   - `annotations` to find the `textFromSubject` response
-   - `subject_data` to recover the original `transcription_id`
-4. The script strips off the full-transcription context and keeps only the volunteer-editable block using the helper logic in `src/zooniverse/transcript_formatter.py`.
-5. All normalized volunteer responses for the same `transcription_id` are grouped together.
-6. The script applies a simple majority vote and selects the most common edited block.
-7. The winning block is written back to `transcriptions.validated_names` in SQLite.
+Useful commands:
 
-This means `validated_names` currently stores one aggregated text blob per page, not a fully parsed research-grade table. It is best understood as an intermediate human-validated layer that later code can parse, normalize, or migrate into a richer schema.
+```powershell
+$env:TRANSCRIPT_SOURCE_FIELD="final_txt_for_upload"
+python src\upload\build_manifest.py
+
+$env:EXPORT_FILE="dataset/classification_export.csv"
+$env:VALIDATED_OUTPUT_COLUMN="validated1"
+python src\upload\postprocess.py
+```
+
+Second pass:
+
+```powershell
+$env:TRANSCRIPT_SOURCE_FIELD="validated1"
+python src\upload\build_manifest.py
+
+$env:VALIDATED_OUTPUT_COLUMN="validated2"
+python src\upload\postprocess.py
+```
 
 ## Operational Notes For Teams
 
-- The upload/post-process loop depends on the Zooniverse subject metadata containing `transcription_id`.
-- The current implementation assumes one Zooniverse subject maps to one transcription row and one page.
-- If a run is interrupted, `src/zooniverse/upload_subjects_S3.py` now supports resuming in an existing subject set rather than forcing a brand new one.
-- Zooniverse exports should be treated as append-only snapshots. Keep a copy of the exact export used for any database update so the provenance of `validated_names` is recoverable later.
+- The upload/post-process loop assumes one Zooniverse subject maps to one page.
+- Recent exports may omit `transcription_id`, so postprocessing falls back to `pdf` + `page`.
+- If a run is interrupted, `src/upload/upload_subjects.py` now supports resuming in an existing subject set rather than forcing a brand new one.
+- Zooniverse exports should be treated as append-only snapshots. Keep a copy of the exact export used for any database update so the provenance of `validated1` / `validated2` is recoverable later.
 
 ## Configuration
 
@@ -233,6 +214,7 @@ Supported environment variables:
 - `TXT_KEY_TEMPLATE`
 - `PAGE_PADDING`
 - `FORMAT_FOR_ZOONIVERSE`
+- `TRANSCRIPT_SOURCE_FIELD`
 
 ### Upload script
 
@@ -243,6 +225,8 @@ Supported environment variables:
 - `ZOONIVERSE_PROJECT_ID`
 - `SUBJECT_SET_NAME`
 - `MANIFEST_PATH`
+- `EXPORT_FILE`
+- `VALIDATED_OUTPUT_COLUMN`
 ## Operational Assumptions
 
 The current design assumes:
@@ -264,8 +248,7 @@ The current design assumes:
 3. The formatted text currently uses existing extracted people and places only.
    It does not yet perform deeper entity cleanup, spelling normalization, or deduplication beyond simple ordering and duplicate suppression.
 
-4. The current post-processing step only aggregates the editable names/places block.
-   It does not attempt to reconcile the full transcription context.
+4. The current post-processing step stores a full cleaned transcription per page, but it still uses simple majority vote rather than richer adjudication.
 
 5. Existing uploaded subject sets are not updated in place.
    Any metadata or text-formatting change requires a new upload batch unless a separate update process is built.
@@ -283,7 +266,7 @@ Additional recommendations for future teams:
 
 - Build a dedicated research interface if this workflow becomes central to the project. Zooniverse is useful for fast deployment and volunteer management, but it has real limitations for scholarly review work, including limited text formatting, weak layout control, and difficulty presenting richer evidence side-by-side.
 - Consider an interface that can show bold labels, clearer section hierarchy, color cues, provenance links, and synchronized views of image, transcription, extracted entities, and prior edits.
-- Store structured post-validation outputs in separate tables rather than a single `validated_names` text field. In the long run, research workflows will benefit from explicit validated people, places, aliases, confidence notes, and reviewer provenance.
+- Store structured post-validation outputs in separate tables rather than only `validated1` / `validated2` text fields. In the long run, research workflows will benefit from explicit validated people, places, aliases, confidence notes, and reviewer provenance.
 - Replace pure majority vote with a richer aggregation strategy when the scale justifies it. For example, future teams could compare volunteer edits line-by-line, flag disagreements for manual review, or combine crowd input with model-assisted adjudication.
 - Add more fault-tolerant batch operations around upload and export ingestion. Large runs can fail due to network interruptions or API instability, so resume-safe workflows should be treated as a requirement rather than a convenience.
 - Consider pushing validated outputs into a searchable internal review tool before building a full public-facing site. That would give researchers a place to inspect entity matches, trace evidence, and correct mistakes before publication.
@@ -299,7 +282,7 @@ After a successful upload:
 3. Open `Classify`.
 4. Verify the page image loads.
 5. Verify the text box is prefilled.
-6. Confirm the editable section and the protected context section appear as expected.
+6. Confirm the inline-highlighted transcription appears as expected.
 7. Submit a test classification and confirm the output appears in the export.
 
 ## Summary

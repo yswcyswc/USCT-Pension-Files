@@ -1,27 +1,16 @@
 # Future Teams Readme (Zooniverse Component)
 
+Architecture diagram: `assets/repo_logic_flow.jpg`
+
+![Repo Logic Flow](assets/repo_logic_flow.jpg)
+
 ## Project Context
 
-This project is larger than the Zooniverse upload scripts, so it helps to understand where the crowdsourcing piece sits in the full workflow.
-
-At a high level, the diagram shows three connected layers:
-
-1. transcription and source-data creation
-2. entity linking and enrichment
-3. crowdsourced validation and downstream public use
+This project is larger than the upload scripts, but this repo mainly covers the Zooniverse validation layer.
 
 ![USCT Pension Files Project Workflow](<assets/373 Project Workflow Updated.jpg>)
 
-The flow is:
-
-- original pension files go through AI transcription
-- page images and page-level text are stored in the source transcription database
-- entity extraction produces structured names, locations, and dates
-- the crowdsourcing layer uses that source database to generate a manifest and send subjects to Zooniverse
-- volunteer corrections are aggregated into validated data
-- validated data flows into a final output database and later into a public-facing search application
-
-Zooniverse is therefore not a standalone side project. It is the main human validation layer between automated transcription/extraction and any later research or public search experience.
+Zooniverse sits between automated transcription/extraction and later research use.
 
 ## What the Zooniverse Component Does
 
@@ -41,34 +30,32 @@ The implemented flow in this repo is:
 
 1. `transcriptions` in SQLite stores the page text and page metadata.
 2. `persons` and `locations` store extracted structured information.
-3. `src/zooniverse/build_manifest_S3.py` queries those tables and generates `dataset/manifest_s3.csv`.
+3. `src/upload/build_manifest.py` queries those tables and generates `dataset/manifest.csv`.
 4. The manifest points each row to a CloudFront-hosted image URL.
-5. `src/zooniverse/transcript_formatter.py` builds the text payload that volunteers will edit.
-6. `src/zooniverse/upload_subjects_S3.py` uploads the image plus the manifest's final text payload to Zooniverse using Panoptes.
+5. `src/upload/transcript_formatter.py` builds the text payload that volunteers will edit.
+6. `src/upload/upload_subjects.py` uploads the image plus the manifest's final text payload to Zooniverse using Panoptes.
 7. Volunteers review and correct text in Zooniverse.
-8. `src/zooniverse/postprocess.py` majority-votes the editable section and writes the result into `validated_names`.
+8. `src/upload/postprocess.py` writes cleaned full-page transcription into `validated1` or `validated2`.
 
 In the workflow diagram, this corresponds to the path:
 
 - `Source Transcription Database (SQLite)` -> `Manifest.csv` -> `Zooniverse` -> `Crowd Validation DB` -> `Aggregation` -> `Final Output DB`
 
-## How Postprocessing Actually Works
+## Validation Workflow
 
-The most important thing to understand is that postprocessing here is not a full database sync from Zooniverse. It is a focused aggregation step for the editable names-and-places block shown to volunteers.
+Use two passes:
 
-The current logic is:
+1. Upload from `final_txt_for_upload`.
+2. Postprocess into `validated1`.
+3. Rebuild from `validated1`.
+4. Upload again if needed.
+5. Postprocess into `validated2`.
 
-1. Export a classifications CSV from Zooniverse after volunteers have completed enough work.
-2. Run `src/zooniverse/postprocess.py`.
-3. The script reads the `textFromSubject` response from each classification.
-4. It uses `subject_data` to recover the `transcription_id` that was attached during upload.
-5. It removes the protected context section and keeps only the volunteer-editable content above the `===Do NOT modify below this===` marker.
-6. It normalizes whitespace and minor formatting differences so that equivalent responses compare cleanly.
-7. It groups all responses by `transcription_id`.
-8. It selects the most common response using a majority vote.
-9. It writes that winning text block to `transcriptions.validated_names`.
+The script now handles exports where:
 
-This is a pragmatic first version. It gives the project a crowd-validated output without requiring a full custom review platform, but it is not yet a rich or final research data model.
+- the corrected text is in `annotations`
+- or the row only records `yes` and the usable text is in `subject_data["AI Transcript"]`
+- or `transcription_id` is missing and the page must be matched by `pdf` + `page`
 
 ## Why the Current Design Looks Like This
 
@@ -92,19 +79,19 @@ This keeps provenance simple and aligns with the rest of the pipeline, which is 
 
 ## Important Files
 
-- [src/zooniverse/build_manifest_S3.py](src/zooniverse/build_manifest_S3.py)
+- [src/upload/build_manifest.py](src/upload/build_manifest.py)
   Builds the S3/CloudFront-based manifest from the database.
 
-- [src/zooniverse/upload_subjects_S3.py](src/zooniverse/upload_subjects_S3.py)
+- [src/upload/upload_subjects.py](src/upload/upload_subjects.py)
   Uploads subjects to Zooniverse in the current `TextFromSubject` format.
 
-- [src/zooniverse/transcript_formatter.py](src/zooniverse/transcript_formatter.py)
+- [src/upload/transcript_formatter.py](src/upload/transcript_formatter.py)
   Holds the reusable formatting and editable-section parsing logic.
 
-- [src/zooniverse/postprocess.py](src/zooniverse/postprocess.py)
-  Aggregates Zooniverse corrections and writes majority-vote names/places back to the database.
+- [src/upload/postprocess.py](src/upload/postprocess.py)
+  Converts classification exports into cleaned validated page text.
 
-- [dataset/manifest_s3.csv](dataset/manifest_s3.csv)
+- [dataset/manifest.csv](dataset/manifest.csv)
   Generated manifest used for upload.
 
 - [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
@@ -115,35 +102,7 @@ This keeps provenance simple and aligns with the rest of the pipeline, which is 
 
 ## Manifest Design
 
-The manifest currently contains:
-
-- `image_url`
-- `txt_url`
-- `page`
-- `pdf_file`
-- `pdf_stem`
-- `transcription_id`
-- `txt_file`
-- `final_txt_for_upload`
-
-This field is the final formatted text payload used for `TextFromSubject` upload.
-
-The payload is structured like:
-
-```text
-===Modify below this===
-People:
-...
-
-Places / Locations:
-...
-
-===Do NOT modify below this===
-===Context: Full Transcription===
-...
-```
-
-The top portion is intended for volunteer editing. The lower section preserves the full page transcription for context.
+The manifest contains the page image URL, the text file URL, page metadata, and the final text payload uploaded to Zooniverse.
 
 ## Online Hosting Assumptions
 
@@ -160,14 +119,14 @@ The current local SQLite file does not yet include `s3_image_url` or `s3_txt_url
 
 ## Current Limitations
 
-1. The editable `People` and `Places / Locations` sections depend on prior extraction quality.
+1. Inline highlights depend on prior extraction quality.
    If upstream extraction is noisy, that noise will be exposed to volunteers.
 
 2. The final volunteer-facing text is currently materialized in the manifest rather than generated entirely at upload time.
    That keeps the upload path simple, but it means the manifest contains more than just routing metadata.
 
-3. The current post-processing step only aggregates the editable names/places section and stores it in `validated_names`.
-   It is a pragmatic first aggregation layer, not a full end-to-end crowd-validation database implementation.
+3. The current post-processing step stores cleaned page text in `validated1` / `validated2`.
+   It is practical, but still not a full validation database model.
 
 4. Previously uploaded Zooniverse subjects are not updated in place.
    If you change the text format or metadata structure, you usually need a new subject set.
@@ -175,8 +134,8 @@ The current local SQLite file does not yet include `s3_image_url` or `s3_txt_url
 5. Zooniverse is useful, but it is not an ideal scholarly annotation interface.
    It gives limited control over formatting and presentation, which makes it harder to show emphasis, better visual hierarchy, structured evidence, and richer review cues.
 
-6. The current `validated_names` field is a single text blob.
-   That is enough for an intermediate result, but it is not the best long-term structure for downstream analysis.
+6. The current `validated1` / `validated2` fields are single text blobs.
+   That is enough for intermediate results, but it is not the best long-term structure for downstream analysis.
 
 ## Likely Next Steps for Future Teams
 
@@ -199,7 +158,7 @@ These are the most promising ways to improve the system beyond the current semes
    A custom interface could show the page image next to the full transcription, highlight candidate names and places, show provenance from the extraction pipeline, and support clearer visual distinction between editable content and protected context.
 
 3. Move from text blobs to structured validation tables.
-   Instead of saving only one `validated_names` text field, future teams could create tables for validated people, validated places, aliases, reviewer decisions, disagreement flags, and confidence notes.
+   Instead of saving only `validated1` / `validated2` text fields, future teams could create tables for validated people, validated places, aliases, reviewer decisions, disagreement flags, and confidence notes.
 
 4. Improve aggregation beyond majority vote.
    Majority vote is a reasonable baseline, but it can fail when volunteers partially agree, format answers differently, or split across two close variants. A stronger system could compare edits section-by-section, route low-agreement cases to manual review, or combine crowd input with model-assisted adjudication.
@@ -224,7 +183,7 @@ These are the most promising ways to improve the system beyond the current semes
 If you are taking over this component, start by:
 
 1. reading [DIETRICH_COMPUTING_README.md](DIETRICH_COMPUTING_README.md)
-2. inspecting [src/zooniverse/build_manifest_S3.py](src/zooniverse/build_manifest_S3.py) and [src/zooniverse/upload_subjects_S3.py](src/zooniverse/upload_subjects_S3.py)
+2. inspecting [src/upload/build_manifest.py](src/upload/build_manifest.py) and [src/upload/upload_subjects.py](src/upload/upload_subjects.py)
 3. generating a small manifest batch
 4. uploading a test subject set to confirm the `TextFromSubject` workflow still behaves as expected
 

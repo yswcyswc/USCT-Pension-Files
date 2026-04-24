@@ -11,7 +11,7 @@ from transcript_formatter import format_ai_transcript
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = Path(os.getenv("TRANSCRIBER_DB_PATH", REPO_ROOT / "dataset/transcriber_db.db"))
-MANIFEST_PATH = Path(os.getenv("MANIFEST_PATH", REPO_ROOT / "dataset/manifest_s3.csv"))
+MANIFEST_PATH = Path(os.getenv("MANIFEST_PATH", REPO_ROOT / "dataset/manifest.csv"))
 CLOUDFRONT_BASE_URL = os.getenv(
     "CLOUDFRONT_BASE_URL",
     "https://d49k6q6w27fis.cloudfront.net",
@@ -30,6 +30,7 @@ FORMAT_FOR_ZOONIVERSE = os.getenv("FORMAT_FOR_ZOONIVERSE", "1").lower() not in {
     "false",
     "no",
 }
+TRANSCRIPT_SOURCE_FIELD = os.getenv("TRANSCRIPT_SOURCE_FIELD", "final_txt_for_upload")
 
 
 def pdf_stem_from_path(pdf_file: str) -> str:
@@ -55,7 +56,10 @@ def main():
 
     MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    records, has_s3_image_url, has_s3_txt_url = fetch_transcriptions(DB_PATH)
+    records, has_s3_image_url, has_s3_txt_url = fetch_transcriptions(
+        DB_PATH,
+        transcript_source_field=TRANSCRIPT_SOURCE_FIELD,
+    )
     people_by_transcription = fetch_people_by_transcription(DB_PATH)
     locations_by_transcription = fetch_locations_by_transcription(DB_PATH)
 
@@ -83,7 +87,7 @@ def main():
 
         transcription_id = record["transcription_id"]
         final_txt_for_upload = format_ai_transcript(
-            record["final_txt_for_upload"] or "",
+            record["transcript_source_text"] or "",
             people_by_transcription.get(transcription_id, []),
             locations_by_transcription.get(transcription_id, []),
             format_for_zooniverse=FORMAT_FOR_ZOONIVERSE,
@@ -125,6 +129,7 @@ def main():
     print(f"Using DB s3_txt_url column: {has_s3_txt_url}")
     print(f"Default image key template: {IMAGE_KEY_TEMPLATE}")
     print(f"Default transcription key template: {TXT_KEY_TEMPLATE}")
+    print(f"Transcript source field: {TRANSCRIPT_SOURCE_FIELD}")
     print("Combined volunteer text is stored in the manifest column: final_txt_for_upload")
 
 

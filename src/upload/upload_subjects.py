@@ -13,8 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 USERNAME = os.getenv("ZOONIVERSE_USERNAME", "usct_pension_files")
 PASSWORD = os.getenv("ZOONIVERSE_PASSWORD", "usct2026")
 PROJECT_ID = int(os.getenv("ZOONIVERSE_PROJECT_ID", "32086"))
-SUBJECT_SET_NAME = os.getenv("SUBJECT_SET_NAME", "Testing Batch Upload")
-MANIFEST_PATH = Path(os.getenv("MANIFEST_PATH", REPO_ROOT / "dataset/manifest_s3.csv"))
+SUBJECT_SET_NAME = os.getenv("SUBJECT_SET_NAME", "Initial Transcription Review")
+MANIFEST_PATH = Path(os.getenv("MANIFEST_PATH", REPO_ROOT / "dataset/manifest.csv"))
 BATCH_SIZE = int(os.getenv("SUBJECT_SET_BATCH_SIZE", "25"))
 RESUME_SKIP_COUNT = int(os.getenv("RESUME_SKIP_COUNT", "0"))
 

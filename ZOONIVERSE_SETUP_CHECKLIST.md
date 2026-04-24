@@ -5,7 +5,7 @@ This is after you uploaded all images.
 ## Step 1 — Check the Subject Set Was Created
 
 1. Go to https://www.zooniverse.org
-2. Click your username (top right) -> **Build a Project** (assumed you logged in using the username and password used by `src/zooniverse/upload_subjects_S3.py`)
+2. Click your username (top right) -> **Build a Project** (assumed you logged in using the username and password used by `src/upload/upload_subjects.py`)
 3. Click **usctPensionFilesTestProject** (Project #32086)
 4. In the left sidebar, click **Subject Sets**
 
@@ -24,7 +24,7 @@ This is after you uploaded all images.
 - `image_filename` — the filename
 - `AI Transcript` — the draft transcript text (this is what volunteers see when they click ⓘ)
 
-If the text box is blank or missing expected text, re-run `src/zooniverse/build_manifest_S3.py` and `src/zooniverse/upload_subjects_S3.py`.
+If the text box is blank or missing expected text, re-run `src/upload/build_manifest.py` and `src/upload/upload_subjects.py`.
 
 
 ## Step 3 — Link the Subject Set to Your Workflow
@@ -82,8 +82,8 @@ If the panel is empty or missing `AI Transcript`, the metadata was not uploaded 
 
 | Problem | Likely Cause | Fix |
 |---------|-------------|-----|
-| Subject set missing from list | Upload script errored out | Check terminal output, re-run `src/zooniverse/upload_subjects_S3.py` with a new set name |
-| Subject count is 0 or wrong | Images not found during upload | Check image paths in manifest, re-run `src/zooniverse/build_manifest_S3.py` |
-| Text box not prefilled as expected | Old manifest or upload mismatch | Re-run `src/zooniverse/build_manifest_S3.py` then `src/zooniverse/upload_subjects_S3.py` |
+| Subject set missing from list | Upload script errored out | Check terminal output, re-run `src/upload/upload_subjects.py` with a new set name |
+| Subject count is 0 or wrong | Images not found during upload | Check image paths in manifest, re-run `src/upload/build_manifest.py` |
+| Text box not prefilled as expected | Old manifest or upload mismatch | Re-run `src/upload/build_manifest.py` then `src/upload/upload_subjects.py` |
 | Classify page shows "You've seen everything" | Subject set not linked to workflow | Follow Step 3 above |
 | Images not loading | File too large or wrong format | Convert to JPEG under 1 MB before upload |

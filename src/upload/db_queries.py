@@ -7,13 +7,24 @@ def get_transcription_columns(conn: sqlite3.Connection) -> set[str]:
     return {row[1] for row in rows}
 
 
-def fetch_transcriptions(db_path: Path):
+def validate_column_name(column_name: str) -> str:
+    if not column_name.isidentifier():
+        raise ValueError(f"Invalid column name: {column_name}")
+    return column_name
+
+
+def fetch_transcriptions(db_path: Path, transcript_source_field: str = "final_txt_for_upload"):
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         columns = get_transcription_columns(conn)
+        transcript_source_field = validate_column_name(transcript_source_field)
 
         has_s3_image_url = "s3_image_url" in columns
         has_s3_txt_url = "s3_txt_url" in columns
+        if transcript_source_field not in columns:
+            raise ValueError(
+                f"Column '{transcript_source_field}' not found in transcriptions table"
+            )
 
         query = """
             SELECT
@@ -21,8 +32,10 @@ def fetch_transcriptions(db_path: Path):
                 pdf_file,
                 page,
                 txt_file,
-                final_txt_for_upload
+                final_txt_for_upload,
+                {transcript_source_field} AS transcript_source_text
         """
+        query = query.format(transcript_source_field=transcript_source_field)
         if has_s3_image_url:
             query += ", s3_image_url"
         if has_s3_txt_url:

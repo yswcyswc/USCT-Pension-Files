@@ -1,20 +1,21 @@
 # Zooniverse Guide for Dr. Fields Black
 
-## What This Part of the Project Does
+## What This Part Does
 
 Zooniverse is the human review stage of this project. Each item shows one page image and a draft transcript so that a person can check the text against the original document and correct it.
 
-## How It Fits into the Pipeline
+## How It Fits Into the Workflow
 
-The project moves in a simple sequence:
+The workflow is:
 
 1. A page is digitized and prepared for review.
 2. The system creates a draft transcript.
 3. That page and its draft transcript are loaded into Zooniverse.
-4. You and your research partners review, correct, and confirm the text.
-5. The corrected results can then be exported for later research use.
+4. A person corrects the text in Zooniverse.
+5. The corrected page text is written back into the project database.
+6. If needed, the same page can be sent through Zooniverse a second time for another round of checking.
 
-Zooniverse is where collaborative checking happens.
+In practical terms, the team keeps the original draft, then stores a first checked version as `validated1`, and a second checked version as `validated2`.
 
 ## How You Can Use It
 
@@ -25,7 +26,7 @@ You can use Zooniverse yourself to:
 - confirm that the workflow is showing the right page and draft text together
 - see how volunteers or partners will experience the material
 
-You can also share it with research partners and encourage them to help validate pages by:
+You can also share it with research partners so they can:
 
 - correcting transcription mistakes
 - filling in missing words
@@ -78,4 +79,4 @@ Once pages have been reviewed in Zooniverse, the resulting transcriptions can be
 
 ## In Short
 
-Zooniverse allows you and your research partners to review page images, improve draft transcripts, and produce more dependable text for later historical research.
+Zooniverse lets the team review page images, improve draft transcripts, and save cleaner page text back into the database for later research use.

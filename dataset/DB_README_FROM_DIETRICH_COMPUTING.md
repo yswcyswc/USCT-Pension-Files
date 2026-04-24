@@ -6,8 +6,6 @@ This project is digitizing and analyzing Civil War pension files from the Nation
 
 Each pension file belongs to one soldier and can contain dozens to hundreds of pages — affidavits, certificates, correspondence, medical examinations, and administrative records. A single file may reference many different people: the claimant, their family members, witnesses, doctors, pension agents, and clerks.
 
-![USCT Pension Files Project Workflow](<assets/373 Project Workflow Updated.jpg>)
-
 ---
 
 ## What You Have Been Given
